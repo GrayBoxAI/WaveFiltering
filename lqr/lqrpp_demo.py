@@ -10,8 +10,6 @@ from sklearn import linear_model
 import matplotlib
 import time
 
-# State Space
-
 def get_filters(n, k):
 	H = hilbert(n)
 	vals,vecs = np.linalg.eig(H)
@@ -42,29 +40,18 @@ def simulate(sys, u, h0=None, noisy=True):
 	return hidden, output, range(num_steps)
 
 def dlqr(A,B,Q,R):
-    """Solve the discrete time lqr controller.
-     
-    x[k+1] = A x[k] + B u[k]
-     
-    cost = sum x[k].T*Q*x[k] + u[k].T*R*u[k]
-    """
-    #ref Bertsekas, p.151
- 
-    #first, try to solve the ricatti equation
+
     X = np.matrix(scipy.linalg.solve_discrete_are(A, B, Q, R))
-     
-    #compute the LQR gain
     K = np.matrix(scipy.linalg.inv(B.T*X*B+R)*(B.T*X*A))
      
-    eigVals, eigVecs = scipy.linalg.eig(A-B*K)
-     
-    return K, X, eigVals
+    S, _ = scipy.linalg.eig(A-B*K)
+
+    return K, X, S
 
 
 if __name__ == "__main__":
 
 	A = np.array([[0.99, 0], [0, 0.99]])
-	#B = np.array([[1, 1], [1, 1]])
 	B = np.array([[1],[2]])
 	C = np.array([[1, 1]])
 	D = np.array([[0]])
@@ -72,10 +59,6 @@ if __name__ == "__main__":
 	sys = (A, B, C, D)
 	u = np.random.randn(1,10000).reshape(1,10000)
 	hidden, output, t = simulate(sys, u, h0=np.array([1, 1]), noisy=False)
-
-	print(hidden)
-	print(output)
-	print(len(t))
 
 	horizon = 200
 	num_feat = 50
@@ -85,11 +68,10 @@ if __name__ == "__main__":
 	feats = []
 	targets = []
 	for i in range(horizon, len(t)-1000):
-		#z = np.append(u[:,i-horizon:i].dot(filters).reshape(-1,1), [[1]], axis=0)
 		z = u[:,i-horizon:i].dot(filters).reshape(-1,1)
 		feats.append(z.dot(z.T).reshape(-1,))
 		targets.append((0-output[:,i])**2)
-		#OGD.fit(feat, output[:,i])
+
 	feats = np.stack(feats, axis=1)
 	targets = np.stack(targets, axis=1)
 
@@ -97,27 +79,21 @@ if __name__ == "__main__":
 
 	output_hat = []
 	for i in range(horizon, len(t)):
-		#z = np.append(u[:,i-horizon:i].dot(filters).reshape(-1,1), [[1]], axis=0)
 		z = u[:,i-horizon:i].dot(filters).reshape(-1,1)
 		feat = z.dot(z.T).reshape(-1,1).T
 		output_hat.append(reg.predict(feat)[0])
 
-	print(len(output_hat))
 
-	#Q = reg.coef_.reshape(11,11)
 	Q = reg.coef_.reshape(num_feat, num_feat)
 
 	U, s, V = np.linalg.svd(Q)
-	print(s)
 	s[np.abs(s) < 1] = 0
-	print(s)
 
 	Q = U.dot(np.diag(s)).dot(U.T)
 
 
 	AA = np.zeros((horizon, horizon))
 	AA[:horizon-1, 1:] = np.eye(horizon-1)
-	#AA[horizon, horizon] = 1
 	
 	BB = np.zeros((horizon,1))
 	BB[horizon-1,0] = 1
@@ -141,8 +117,6 @@ if __name__ == "__main__":
 		hidden, output_new, _ = simulate(sys, uu[:,i], h0=last_hidden, noisy=False)
 		last_hidden = hidden[:, -1]
 		controled_output[:,i] = output_new[-1]
-		#z = np.append(u[:,i-horizon:i].dot(filters).reshape(-1,1), [[1]], axis=0)
-		#output_hat.append(reg.predict(feat)[0])
 
 	free_output = np.zeros(output.shape)
 	free_output[0, :horizon] = dummy_output
@@ -167,13 +141,6 @@ if __name__ == "__main__":
 		last_hidden = hidden[:, -1]
 		lqr_output[:,i] = output_new[-1]
 
-	"""
-	for i in range(horizon, len(t)):
-
-		z = np.append(u[:,i-horizon:i].dot(filters).reshape(-1,1), [[1]], axis=0)
-		feat = z.dot(z.T).reshape(-1,)
-		output_hat.append(reg.predict(feat)[0])
-	"""
 
 	x_roll = np.zeros(500)
 	y_roll = np.zeros(500)
@@ -184,7 +151,6 @@ if __name__ == "__main__":
 	ht = np.array([[0],[0]])
 	ht_lqrpp = np.array([[0],[0]])
 
-	# matplotlib.use('GTKAgg')
 
 	plt.subplot(2,1,1)
 	lxl, = plt.plot(x_roll_lqrpp, c='blue', label='LQR++ (ours)')
@@ -199,7 +165,6 @@ if __name__ == "__main__":
 
 	t_demo = 0
 	while True:
-		# plt.clf()
 		plt.ion()
 
 		plt.subplot(2,1,1)
@@ -220,7 +185,6 @@ if __name__ == "__main__":
 		y_roll[:-1] = y_roll[1:]
 		y_roll[-1] = C.dot(ht)
 
-		# plt.plot(x_roll, c='red')
 		lx.set_ydata(x_roll)
 
 		x_horizon = x_roll_lqrpp[-horizon:]
@@ -237,12 +201,7 @@ if __name__ == "__main__":
 		y_roll_lqrpp[:-1] = y_roll_lqrpp[1:]
 		y_roll_lqrpp[-1] = C.dot(ht_lqrpp)
 		
-		# plt.plot(x_roll_lqrpp, c='blue')
 		lxl.set_ydata(x_roll_lqrpp)
-
-		# plt.plot(t[horizon:horizon+500], np.abs(controled_output[0,horizon:horizon+500]),'g:',linewidth=1,label='lqr++(ours)')
-		# plt.plot(t[horizon:horizon+500], np.abs(free_output[0,horizon:horizon+500]),'b:',linewidth=1,label='free')
-		# plt.plot(t[horizon:horizon+500], np.abs(lqr_output[0,horizon:horizon+500]),'r:',linewidth=1,label='lqr')
 
 		plt.subplot(2,1,2)
 
@@ -251,16 +210,12 @@ if __name__ == "__main__":
 		plt.xlim([0,500])
 		plt.ylim([-20,20])
 
-		# plt.plot(y_roll, c='red')
 		ly.set_ydata(y_roll)
 
 		plt.xlabel('Time - ' + str(t_demo))
 
-		# plt.plot(y_roll_lqrpp, c='blue')
 		lyl.set_ydata(y_roll_lqrpp)
 
-		# plt.draw()
 		plt.show()
 
 		plt.pause(0.01)
-		# time.sleep(0.05)
